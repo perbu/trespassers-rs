@@ -33,7 +33,9 @@ decides how fast the shot travels. What is new:
   Losing a ship resets it.
 * **Power-ups.** Dropped now and then by aliens, and always by the courier
   that crosses above the fleet: `T` triple shot, `C` overcharge (the gun
-  charges three times as fast), `S` shield (absorbs one hit).
+  charges three times as fast), `S` shield (absorbs one hit), `H` homing
+  (shots steer toward aliens), `Z` slow time (everything but you and your
+  shots runs at half speed), `D` deflector (destroys bombs near your ship).
 * **Armour.** From wave 3 the top row takes two hits, from wave 5 the second
   row too. A lance still kills in one.
 * Zigzagging bombs from wave 2. Bombs can be shot down.

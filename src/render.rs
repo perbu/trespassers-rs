@@ -9,7 +9,7 @@ use crate::game::{
     SHOCK_LIFE, Shock, TOP, W, World,
 };
 use crate::gfx::Gfx;
-use crate::palette::{self, AMBER, BLUE, CYAN, MAGENTA, ORANGE, RED, Rgb, WHITE};
+use crate::palette::{self, AMBER, BLUE, CYAN, GREEN, MAGENTA, ORANGE, RED, Rgb, WHITE, YELLOW};
 
 /// Drifting background stars, shared by the menu and the game.
 pub struct Stars {
@@ -124,6 +124,9 @@ fn power_style(power: Power) -> (Rgb, &'static str) {
         Power::Triple => (MAGENTA, "T"),
         Power::Shield => (BLUE, "S"),
         Power::Overcharge => (AMBER, "C"),
+        Power::Homing => (YELLOW, "H"),
+        Power::SlowTime => (CYAN, "Z"),
+        Power::Deflector => (GREEN, "D"),
     }
 }
 
@@ -322,6 +325,11 @@ fn draw_player(gfx: &mut Gfx, world: &World) {
     if full {
         gfx.circle(pos, 31.0 + 2.0 * pulse, 1.2, CYAN.a(0.7 * vis));
     }
+    if p.deflector > 0.0 {
+        let k = if p.deflector < 2.0 { 0.5 + 0.5 * (t * 14.0).sin() } else { 1.0 };
+        gfx.circle(pos, crate::game::DEFLECTOR_R, 1.4, GREEN.a(0.35 * k));
+        gfx.circle(pos, crate::game::DEFLECTOR_R - 6.0, 1.0, GREEN.a(0.15 * k));
+    }
     if p.shield {
         for i in 0..3 {
             let a = t * 2.4 + TAU * i as f32 / 3.0;
@@ -378,6 +386,15 @@ fn draw_hud(gfx: &mut Gfx, world: &World) {
     }
     if p.overcharge > 0.0 {
         label(format!("OVERCHARGE {:02}", p.overcharge.ceil() as u32), AMBER);
+    }
+    if p.homing > 0.0 {
+        label(format!("HOMING {:02}", p.homing.ceil() as u32), YELLOW);
+    }
+    if p.slow > 0.0 {
+        label(format!("SLOW TIME {:02}", p.slow.ceil() as u32), CYAN);
+    }
+    if p.deflector > 0.0 {
+        label(format!("DEFLECTOR {:02}", p.deflector.ceil() as u32), GREEN);
     }
     if p.shield {
         label("SHIELD".to_string(), BLUE);

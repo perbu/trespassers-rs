@@ -6,7 +6,7 @@ mod rng;
 #[cfg(test)]
 mod tests;
 
-use std::f32::consts::{FRAC_PI_2, TAU};
+use std::f32::consts::{FRAC_PI_2, PI, TAU};
 
 use macroquad::math::{Vec2, vec2};
 
@@ -46,12 +46,20 @@ const MIN_CHARGE: f32 = 0.09;
 const LANCE_PIERCE: u8 = 3;
 const MAX_SHOTS: usize = 8;
 const MAX_BOMBS: usize = 16;
-const MAX_PARTICLES: usize = 4000;
+const MAX_PARTICLES: usize = 8000;
 const COMBO_WINDOW: f32 = 2.2;
 const MAX_MULTIPLIER: u32 = 8;
 const DIVE_WINDUP: f32 = 0.4;
 const TRIPLE_TIME: f32 = 12.0;
 const OVERCHARGE_DURATION: f32 = 10.0;
+const HOMING_TIME: f32 = 12.0;
+const SLOW_TIME: f32 = 8.0;
+/// Fraction of normal speed the world runs at under Slow Time.
+const SLOW_FACTOR: f32 = 0.5;
+const DEFLECTOR_TIME: f32 = 10.0;
+pub const DEFLECTOR_R: f32 = 120.0;
+/// Radians per second a homing shot can turn.
+const HOMING_TURN: f32 = 5.0;
 
 #[derive(Clone, Copy, Default)]
 pub struct Input {
@@ -196,6 +204,9 @@ pub struct Player {
     pub shield: bool,
     pub triple: f32,
     pub overcharge: f32,
+    pub homing: f32,
+    pub slow: f32,
+    pub deflector: f32,
 }
 
 #[derive(Clone, Copy)]
@@ -204,6 +215,7 @@ pub struct Shot {
     pub vel: Vec2,
     pub charge: f32,
     pub lance: bool,
+    pub homing: bool,
     pierce: u8,
 }
 
@@ -220,6 +232,9 @@ pub enum Power {
     Triple,
     Shield,
     Overcharge,
+    Homing,
+    SlowTime,
+    Deflector,
 }
 
 pub struct PowerUp {
@@ -325,6 +340,9 @@ impl World {
                 shield: false,
                 triple: 0.0,
                 overcharge: 0.0,
+                homing: 0.0,
+                slow: 0.0,
+                deflector: 0.0,
             },
             fleet,
             shots: Vec::new(),
@@ -379,9 +397,11 @@ impl World {
             }
             Phase::Playing => {
                 self.update_player(dt, input, true);
-                self.update_fleet(dt);
-                self.update_courier(dt);
-                self.update_projectiles(dt);
+                // Slow Time slows everything but the player and their shots.
+                let wdt = if self.player.slow > 0.0 { dt * SLOW_FACTOR } else { dt };
+                self.update_fleet(wdt);
+                self.update_courier(wdt);
+                self.update_projectiles(dt, wdt);
                 self.collide_shots();
                 self.collide_player();
                 self.check_invasion();
@@ -439,6 +459,9 @@ impl World {
         p.invulnerable = (p.invulnerable - dt).max(0.0);
         p.triple = (p.triple - dt).max(0.0);
         p.overcharge = (p.overcharge - dt).max(0.0);
+        p.homing = (p.homing - dt).max(0.0);
+        p.slow = (p.slow - dt).max(0.0);
+        p.deflector = (p.deflector - dt).max(0.0);
 
         // Tap to fire whatever charge there is; hold to release full lances.
         let wants_fire = input.fire_pressed || (input.fire && p.charge >= 1.0);
@@ -463,6 +486,7 @@ impl World {
                 vel: vec2(a.sin(), -a.cos()) * speed,
                 charge,
                 lance,
+                homing: self.player.homing > 0.0,
                 pierce: if lance { LANCE_PIERCE } else { 0 },
             });
         }
@@ -636,12 +660,39 @@ impl World {
         }
     }
 
-    fn update_projectiles(&mut self, dt: f32) {
+    fn update_projectiles(&mut self, dt: f32, wdt: f32) {
+        // Homing shots steer toward the nearest alien ahead of them.
+        let targets: Vec<Vec2> = self.fleet.enemies.iter().map(|e| e.pos).collect();
         for s in &mut self.shots {
+            if s.homing {
+                let speed = s.vel.length();
+                let nearest = targets
+                    .iter()
+                    .filter(|t| t.y < s.pos.y)
+                    .min_by(|a, b| {
+                        a.distance_squared(s.pos).total_cmp(&b.distance_squared(s.pos))
+                    });
+                if let Some(&t) = nearest
+                    && speed > 0.0
+                {
+                    let want = (t - s.pos).to_angle();
+                    let have = s.vel.to_angle();
+                    let mut diff = want - have;
+                    while diff > PI {
+                        diff -= TAU;
+                    }
+                    while diff < -PI {
+                        diff += TAU;
+                    }
+                    let turn = diff.clamp(-HOMING_TURN * dt, HOMING_TURN * dt);
+                    s.vel = Vec2::from_angle(have + turn) * speed;
+                }
+            }
             s.pos += s.vel * dt;
         }
         self.shots
             .retain(|s| s.pos.y > TOP - 20.0 && s.pos.x > LEFT - 20.0 && s.pos.x < RIGHT + 20.0);
+        let dt = wdt;
         for b in &mut self.bombs {
             b.t += dt;
             b.pos += b.vel * dt;
@@ -731,14 +782,16 @@ impl World {
         let offset = ((impact_x - e.pos.x) / ENEMY_R).clamp(-1.0, 1.0);
         let bias = -offset * (std::f32::consts::PI / 6.0);
         let color = e.kind.color();
-        self.burst(e.pos, color, 28, 300.0, 600.0, Some((bias, FRAC_PI_2)));
-        self.burst(e.pos, color.mix(palette::WHITE, 0.4), 20, 50.0, 320.0, None);
+        self.burst(e.pos, color, 90, 300.0, 760.0, Some((bias, FRAC_PI_2)));
+        self.burst(e.pos, color.mix(palette::WHITE, 0.4), 70, 50.0, 420.0, None);
+        self.burst(e.pos, palette::WHITE, 30, 250.0, 900.0, None);
+        self.burst(e.pos, color, 40, 20.0, 160.0, None);
         self.shocks.push(Shock {
             pos: e.pos,
             age: 0.0,
-            strength: 1.0,
+            strength: 1.3,
         });
-        self.shake = self.shake.max(0.22);
+        self.shake = self.shake.max(0.3);
         self.popups.push(Popup {
             pos: e.pos - vec2(0.0, 18.0),
             text: format!("+{gained}"),
@@ -774,7 +827,13 @@ impl World {
     }
 
     fn drop_powerup(&mut self, pos: Vec2) {
-        let mut options = vec![Power::Triple, Power::Overcharge];
+        let mut options = vec![
+            Power::Triple,
+            Power::Overcharge,
+            Power::Homing,
+            Power::SlowTime,
+            Power::Deflector,
+        ];
         if !self.player.shield {
             options.push(Power::Shield);
         }
@@ -796,12 +855,28 @@ impl World {
                     Power::Triple => self.player.triple = TRIPLE_TIME,
                     Power::Shield => self.player.shield = true,
                     Power::Overcharge => self.player.overcharge = OVERCHARGE_DURATION,
+                    Power::Homing => self.player.homing = HOMING_TIME,
+                    Power::SlowTime => self.player.slow = SLOW_TIME,
+                    Power::Deflector => self.player.deflector = DEFLECTOR_TIME,
                 }
                 self.score += 25;
                 self.burst(p.pos, palette::WHITE, 24, 60.0, 300.0, None);
                 self.events.push(Event::Pickup);
             } else {
                 i += 1;
+            }
+        }
+
+        if self.player.deflector > 0.0 {
+            let mut i = 0;
+            while i < self.bombs.len() {
+                if circles_overlap(player, DEFLECTOR_R, self.bombs[i].pos, BOMB_R) {
+                    let pos = self.bombs.swap_remove(i).pos;
+                    self.burst(pos, palette::GREEN, 12, 40.0, 240.0, None);
+                    self.events.push(Event::BombShot);
+                } else {
+                    i += 1;
+                }
             }
         }
 
@@ -865,6 +940,9 @@ impl World {
         self.player.alive = false;
         self.player.triple = 0.0;
         self.player.overcharge = 0.0;
+        self.player.homing = 0.0;
+        self.player.slow = 0.0;
+        self.player.deflector = 0.0;
         self.combo = 0;
         self.combo_timer = 0.0;
         self.burst(pos, palette::AMBER, 120, 60.0, 620.0, None);

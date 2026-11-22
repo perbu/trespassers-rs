@@ -88,7 +88,7 @@ fn full_charge_fires_a_piercing_lance() {
     for _ in 0..240 {
         pacify(&mut w);
         w.collide_shots();
-        w.update_projectiles(DT);
+        w.update_projectiles(DT, DT);
     }
     let killed = before - w.fleet.enemies.len();
     assert_eq!(killed, 1 + LANCE_PIERCE as usize);
@@ -106,7 +106,7 @@ fn weak_shot_stops_at_the_first_alien() {
     let before = w.fleet.enemies.len();
     for _ in 0..600 {
         w.collide_shots();
-        w.update_projectiles(DT);
+        w.update_projectiles(DT, DT);
     }
     assert_eq!(before - w.fleet.enemies.len(), 1);
     assert!(w.shots.is_empty());
@@ -192,4 +192,44 @@ fn autopilot_survives_and_scores() {
         w.update(DT, &input);
     }
     assert!(w.score > 100, "bot only scored {}", w.score);
+}
+
+#[test]
+fn deflector_destroys_nearby_bombs() {
+    let mut w = playing();
+    pacify(&mut w);
+    w.player.deflector = 5.0;
+    let pos = w.player_pos() - vec2(0.0, DEFLECTOR_R - 20.0);
+    w.bombs.push(Bomb { pos, vel: vec2(0.0, 100.0), zigzag: false, t: 0.0, base_x: pos.x });
+    w.collide_player();
+    assert!(w.bombs.is_empty());
+    assert_eq!(w.lives, START_LIVES);
+}
+
+#[test]
+fn slow_time_slows_bombs_but_not_the_player() {
+    let mut w = playing();
+    pacify(&mut w);
+    w.player.slow = 5.0;
+    let pos = vec2(W / 2.0, 300.0);
+    w.bombs.push(Bomb { pos, vel: vec2(0.0, 200.0), zigzag: false, t: 0.0, base_x: pos.x });
+    w.update(1.0, &Input::default());
+    let dy = w.bombs[0].pos.y - pos.y;
+    assert!((dy - 100.0).abs() < 1.0, "bomb moved {dy}");
+}
+
+#[test]
+fn homing_shot_bends_toward_an_alien() {
+    let mut w = playing();
+    pacify(&mut w);
+    let target = w.fleet.enemies[0].pos;
+    w.player.x = target.x + 120.0;
+    w.player.homing = 5.0;
+    w.player.charge = 0.5;
+    w.fire();
+    let before = w.shots[0].vel.x;
+    for _ in 0..30 {
+        w.update_projectiles(DT, DT);
+    }
+    assert!(w.shots[0].vel.x < before, "shot did not turn left");
 }
