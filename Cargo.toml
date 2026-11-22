@@ -1,0 +1,9 @@
+[package]
+name = "trespassers-rs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+dotenvy = "0.15.7"
+macroquad = "0.4.16"
+rodio = { version = "0.23.0", default-features = false, features = ["playback", "mp3", "wav"] }
